@@ -68,16 +68,28 @@ class CitationChecker(Middleware):
     name = "citation_checker"
 
     def after_agent(self, ctx, report):
-        # TODO (§11): khoảng 10-25 dòng.
-        #  1. Lấy report["claims"]; bỏ qua nếu rỗng hoặc ctx.corpus là None.
-        #  2. Với mỗi claim, gọi ctx.corpus.get(claim["doc_id"]).
-        #     Nếu tài liệu tồn tại VÀ claim["text"] khớp NGUYÊN VĂN một
-        #     DÒNG trong body của nó (không phải chỉ "nằm trong body")
-        #     -> trích dẫn đã đúng, giữ nguyên claim.
-        #  3. Nếu không: tìm trong ctx.corpus.docs tài liệu đầu tiên thoả
-        #     doc.body in ctx.observed_text  và  claim["text"] khớp
-        #     nguyên văn một DÒNG của doc.body -> đó là nguồn thật.
-        #     Đổi doc_id sang nó, GIỮ NGUYÊN text.
-        #  4. Không tìm được nguồn nào -> để `critic` xử lý, đừng bịa doc_id.
-        #  5. Cập nhật report["citations"] = danh sách doc_id đã sắp xếp.
-        return report  # <- mặc định KHÔNG LÀM GÌ: agent vẫn chạy được
+        claims = report.get("claims")
+        if not isinstance(claims, list) or not ctx.corpus:
+            return report
+
+        for c in claims:
+            if not isinstance(c, dict):
+                continue
+            text = c.get("text", "")
+            if not text:
+                continue
+            doc_id = c.get("doc_id")
+            current_doc = ctx.corpus.get(doc_id) if doc_id else None
+
+            # 1. Kiểm tra xem trích dẫn hiện tại có khớp nguyên văn một DÒNG không
+            if current_doc and any(text in line for line in current_doc.body.splitlines()):
+                continue
+
+            # 2. Nếu sai: tìm tài liệu thực sự chứa dòng này trong số tài liệu đã đọc
+            for doc in ctx.corpus.docs:
+                if doc.body in ctx.observed_text and any(text in line for line in doc.body.splitlines()):
+                    c["doc_id"] = doc.doc_id
+                    break
+
+        report["citations"] = sorted({c["doc_id"] for c in claims if isinstance(c, dict) and "doc_id" in c and c["doc_id"]})
+        return report
